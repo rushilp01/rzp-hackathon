@@ -26,7 +26,7 @@ fi
 
 # Install backend dependencies
 echo "Installing Python dependencies..."
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Install frontend dependencies
 echo "Installing Node.js dependencies..."

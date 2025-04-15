@@ -26,6 +26,8 @@ function App() {
   const [textToUpload, setTextToUpload] = useState('');
   const [uploadCollection, setUploadCollection] = useState('');
   const [uploadStatus, setUploadStatus] = useState(null);
+  const [folderToUpload, setFolderToUpload] = useState(null);
+  const [folderUploadCollection, setFolderUploadCollection] = useState('');
 
   // Fetch available collections on load
   useEffect(() => {
@@ -39,6 +41,7 @@ function App() {
       if (response.data.collections.length > 0) {
         setSelectedCollection(response.data.collections[0]);
         setUploadCollection(response.data.collections[0]);
+        setFolderUploadCollection(response.data.collections[0]);
       }
     } catch (error) {
       console.error('Error fetching collections:', error);
@@ -72,6 +75,10 @@ function App() {
 
   const handleFileUpload = (e) => {
     setFileToUpload(e.target.files[0]);
+  };
+
+  const handleFolderUpload = (e) => {
+    setFolderToUpload(e.target.files[0]);
   };
 
   const handleUploadSubmit = async (e) => {
@@ -119,6 +126,112 @@ function App() {
     }
   };
 
+  const handleFolderUploadSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!folderUploadCollection || !folderToUpload) {
+      alert('Please select a collection and a zip file containing your folder.');
+      return;
+    }
+
+    // Validate file size (100MB max)
+    const maxSize = 100 * 1024 * 1024; // 100MB in bytes
+    if (folderToUpload.size > maxSize) {
+      setUploadStatus({
+        success: false,
+        message: `File size exceeds the 100MB limit. Current size: ${(folderToUpload.size / (1024 * 1024)).toFixed(2)}MB`
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    setUploadStatus({
+      success: true,
+      message: "Uploading folder... This may take a while for large files."
+    });
+
+    const formData = new FormData();
+    formData.append('collection', folderUploadCollection);
+    formData.append('folder_zip', folderToUpload);
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/ingest-folder`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        // Add timeout for large files
+        timeout: 300000, // 5 minutes
+      });
+      
+      // Create a more detailed success message
+      const result = response.data;
+      setUploadStatus({
+        success: true,
+        message: `Successfully processed ${result.files_processed} files with ${result.total_chunks} chunks.${
+          result.skipped_binary_files > 0 ? ` (${result.skipped_binary_files} binary files skipped)` : ''
+        }${
+          result.failed_files > 0 ? ` (${result.failed_files} files failed to process)` : ''
+        }`,
+        folderStructure: result.folder_structure
+      });
+      
+      // Reset form
+      setFolderToUpload(null);
+      document.getElementById('folder-upload').value = '';
+    } catch (error) {
+      console.error('Error uploading folder:', error);
+      setUploadStatus({
+        success: false,
+        message: error.response?.data?.detail || 'Error uploading folder. Please try again.'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Create a recursive FolderStructure component to display nested folders
+  const FolderStructure = ({ structure, depth = 0 }) => {
+    const entries = Object.entries(structure);
+    
+    if (entries.length === 0) return null;
+    
+    return (
+      <ul className={`pl-4 ${depth > 0 ? 'border-l border-gray-200 ml-1' : ''}`}>
+        {entries.map(([key, value]) => {
+          if (key === 'files') {
+            return (
+              <li key={key} className="py-1">
+                <span className="font-medium text-gray-700">Files:</span>
+                <ul className="pl-4">
+                  {value.map((file, idx) => (
+                    <li key={idx} className="text-gray-600 text-sm py-1 flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                      {file}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            );
+          } else {
+            return (
+              <li key={key} className="py-1">
+                <div className="flex items-center font-medium text-gray-800">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-indigo-500 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  {key}
+                </div>
+                <FolderStructure structure={value} depth={depth + 1} />
+              </li>
+            );
+          }
+        })}
+      </ul>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
       <header className="bg-gradient-to-r from-indigo-600 to-indigo-800 text-white shadow-md">
@@ -153,7 +266,20 @@ function App() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
               </svg>
-              Upload Documents
+              Upload Document
+            </span>
+          </button>
+          <button
+            className={`px-5 py-2.5 rounded-t-lg font-medium transition-all duration-200 ${
+              activeTab === 'folder' ? 'bg-white shadow-md text-indigo-600 border-t-2 border-indigo-500' : 'bg-gray-200 hover:bg-gray-300'
+            }`}
+            onClick={() => setActiveTab('folder')}
+          >
+            <span className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              Upload Folder
             </span>
           </button>
         </div>
@@ -297,7 +423,7 @@ function App() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === 'upload' ? (
             <div>
               <h2 className="text-2xl font-semibold mb-6 text-gray-800 border-b pb-2">Upload Documents</h2>
               <form onSubmit={handleUploadSubmit}>
@@ -412,6 +538,124 @@ function App() {
                     </svg>
                   )}
                   <span>{uploadStatus.message}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <h2 className="text-2xl font-semibold mb-6 text-gray-800 border-b pb-2">Upload Folder (ZIP)</h2>
+              <form onSubmit={handleFolderUploadSubmit}>
+                <div className="mb-6">
+                  <label className="block text-gray-700 mb-2 font-medium">Target Collection:</label>
+                  <div className="flex flex-wrap gap-3">
+                    {collections.filter(c => c !== 'global').map((collection) => (
+                      <button
+                        key={collection}
+                        type="button"
+                        onClick={() => setFolderUploadCollection(collection)}
+                        className={`px-4 py-2 rounded-lg border transition-all ${
+                          folderUploadCollection === collection 
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700' 
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className={`inline-block w-3 h-3 rounded-full mr-2 ${COLLECTION_COLORS[collection]?.bg || 'bg-gray-300'}`}></span>
+                        {collection.charAt(0).toUpperCase() + collection.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="mb-6">
+                  <label className="block text-gray-700 mb-2 font-medium">Upload Zipped Folder:</label>
+                  <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-indigo-300 transition-colors">
+                    <div className="space-y-1 text-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                      <div className="flex text-sm text-gray-600">
+                        <label className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none">
+                          <span>Upload a ZIP file</span>
+                          <input 
+                            id="folder-upload" 
+                            name="folder-upload" 
+                            type="file" 
+                            accept=".zip"
+                            className="sr-only" 
+                            onChange={handleFolderUpload}
+                          />
+                        </label>
+                        <p className="pl-1">or drag and drop</p>
+                      </div>
+                      <p className="text-xs text-gray-500">ZIP files containing folders with documents up to 100MB</p>
+                      <p className="text-xs text-gray-500 mt-2">Supported files: .txt, .md, .py, .js, .html, .css, .json, .xml, .csv, .log, .rst, .java, .ts, .jsx, .tsx</p>
+                    </div>
+                  </div>
+                  {folderToUpload && (
+                    <div className="mt-2 text-sm text-gray-500 flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>{folderToUpload.name} selected ({(folderToUpload.size / (1024 * 1024)).toFixed(2)}MB)</span>
+                    </div>
+                  )}
+                </div>
+                
+                <button
+                  type="submit"
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                  disabled={
+                    isLoading || 
+                    !folderUploadCollection || 
+                    !folderToUpload
+                  }
+                >
+                  {isLoading ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                      Upload Folder
+                    </>
+                  )}
+                </button>
+              </form>
+              
+              {uploadStatus && (
+                <div className={`mt-6 p-4 rounded-lg flex flex-col ${
+                  uploadStatus.success 
+                    ? 'bg-green-50 text-green-800 border border-green-200' 
+                    : 'bg-red-50 text-red-800 border border-red-200'
+                }`}>
+                  <div className="flex items-start">
+                    {uploadStatus.success ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    )}
+                    <span>{uploadStatus.message}</span>
+                  </div>
+                  
+                  {uploadStatus.folderStructure && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Folder Structure Processed:</h4>
+                      <div className="bg-white p-3 rounded-md border border-gray-200 max-h-80 overflow-auto">
+                        <FolderStructure structure={uploadStatus.folderStructure} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
